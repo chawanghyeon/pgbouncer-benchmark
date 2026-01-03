@@ -140,11 +140,17 @@ python run_benchmark.py
 ![P95 Latency Comparison](results/plots/p95_latency_comparison.png)
 
 ### Data Table
-| Framework | Pool Mode | Users | RPS | P95 Latency (ms) | Failures/s |
-|-----------|-----------|-------|-----|------------------|------------|
-| django | direct | 1000 | 61 | 18000 | 0.0 |
-| django | pooled | 1000 | 377 | 3700 | 0.0 |
-| fastapi | direct | 1000 | - | - | - |
-| fastapi | pooled | 1000 | 1134 | 1200 | 0.0 |
-| flask | direct | 1000 | 706 | 1700 | 0.0 |
-| flask | pooled | 1000 | 814 | 1400 | 0.0 |
+| Framework | Pool Mode | Users | RPS | P95 Latency (ms) | DB CPU (%) | App CPU (%) |
+|-----------|-----------|-------|-----|------------------|------------|-------------|
+| django | direct | 500 | 57 | 11000 | 49.2 | 38.8 |
+| django | direct | 1000 | 64 | 17000 | 49.7 | 39.4 |
+| **django** | **pooled** | **500** | **399** | **1800** | **13.8** | **100.5** |
+| **django** | **pooled** | **1000** | **395** | **3200** | **13.2** | **101.0** |
+| fastapi | direct | 500 | 843 | 980 | 31.0 | 98.4 |
+| fastapi | direct | 1000 | 611 | 2400 | 27.8 | 97.2 |
+| fastapi | pooled | 500 | 720 | 1100 | 25.7 | 94.7 |
+| fastapi | pooled | 1000 | 805 | 1900 | 25.2 | 95.1 |
+| flask | direct | 500 | 647 | 1200 | 28.3 | 101.5 |
+| flask | direct | 1000 | 587 | 2100 | 25.8 | 101.2 |
+| flask | pooled | 500 | 745 | 1000 | 28.8 | 101.3 |
+| flask | pooled | 1000 | 730 | 1700 | 26.8 | 101.2 |

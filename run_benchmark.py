@@ -1,13 +1,16 @@
 import subprocess
 import time
 import os
+import threading
+import json
+import statistics
 import pandas as pd
 
 
 # Configuration
 FRAMEWORKS = ["fastapi", "flask", "django"]
 POOL_MODES = ["direct", "pooled"]
-USER_COUNTS = [1000]  # Concurrency levels
+USER_COUNTS = [500, 1000]  # Concurrency levels
 SPAWN_RATE = 50  # Users per second
 RUN_TIME = "60s"  # Test duration per scenario, e.g., "1m" or "60s"
 RESULTS_DIR = "results"
@@ -28,8 +31,6 @@ def cleanup():
 def wait_for_service(service_name, port, timeout=60):
     """
     Rudimentary wait for service.
-    In a real scenario, we might retry curling the health check endpoint.
-    For now, we just sleep a bit or use `docker-compose exec` to check.
     """
     print(f"Waiting for {service_name} to stabilize...")
     time.sleep(30)  # Increased wait for DB init
@@ -42,24 +43,71 @@ def ensure_db_ready():
     wait_for_service("postgres", 5432)
 
     # Check if we need to seed
-    # We can check by querying the users count
     try:
         check_cmd = "docker-compose exec -T postgres psql -U postgres -d benchmark_db -c 'SELECT count(*) FROM users'"
         output = subprocess.check_output(check_cmd, shell=True).decode()
-        if "0" in output.splitlines()[2].strip():  # Rudimentary parsing
+        if "0" in output.splitlines()[2].strip():
             raise Exception("Empty Table")
         print("Data exists, skipping seed.")
     except Exception:
         print("Seeding database...")
-        # Run seed.py locally using venv python
-        # Ensure postgres port 5432 is accessible (it is mapped in docker-compose)
         run_command("./venv/bin/python database/seed.py")
+
+
+def monitor_resources(stop_event, containers, results):
+    """
+    Monitors Docker container resources in a background thread.
+    stores result in `results` dict.
+    """
+    stats_data = {c: {"cpu": [], "mem": []} for c in containers}
+
+    while not stop_event.is_set():
+        try:
+            # Get stats for all running containers
+            cmd = [
+                "docker",
+                "stats",
+                "--no-stream",
+                "--format",
+                "{{.Name}},{{.CPUPerc}},{{.MemPerc}}",
+            ]
+            output = subprocess.check_output(cmd).decode().strip().splitlines()
+
+            for line in output:
+                try:
+                    name, cpu_str, mem_str = line.split(",")
+                    if name in containers:
+                        # Parse CSS percentage (10.5%) -> 10.5
+                        cpu_val = float(cpu_str.strip("%"))
+                        mem_val = float(mem_str.strip("%"))
+                        stats_data[name]["cpu"].append(cpu_val)
+                        stats_data[name]["mem"].append(mem_val)
+                except ValueError:
+                    continue  # Skip if parsing fails
+
+        except Exception as e:
+            print(f"Monitor Warning: {e}")
+
+        time.sleep(1)
+
+    # Calculate averages
+    for c in containers:
+        cpus = stats_data[c]["cpu"]
+        mems = stats_data[c]["mem"]
+        if cpus:
+            results[c] = {
+                "avg_cpu": statistics.mean(cpus),
+                "avg_mem": statistics.mean(mems),
+            }
+        else:
+            results[c] = {"avg_cpu": 0, "avg_mem": 0}
 
 
 def run_scenario(framework, pool_mode, users):
     """Runs a single benchmark scenario."""
     filename = f"{framework}_{pool_mode}_{users}u"
     result_file = os.path.join(RESULTS_DIR, f"{filename}_stats.csv")
+    resource_file = os.path.join(RESULTS_DIR, f"{filename}_resources.json")
 
     if os.path.exists(result_file):
         print(f"Skipping {filename}: Results already exist.")
@@ -71,12 +119,6 @@ def run_scenario(framework, pool_mode, users):
 
     try:
         # 1. Start Infrastructure
-        # Always restart database/pgbouncer to ensure clean state?
-        # Or keep DB running? Keeping DB running is faster, but might carry over caching effects.
-        # For this benchmark, let's keep DB running but restart pgbouncer if needed.
-        # Actually, restart app to clear app-level pools.
-
-        # Cleanup override if it exists from a previous crash
         if os.path.exists("docker-compose.override.yml"):
             os.remove("docker-compose.override.yml")
 
@@ -84,7 +126,6 @@ def run_scenario(framework, pool_mode, users):
         run_command(f"docker-compose stop {service_name}")
         run_command(f"docker-compose rm -f {service_name}")
 
-        # Strategy: generate `docker-compose.override.yml` for the current run.
         with open("docker-compose.override.yml", "w") as f:
             val = "1" if pool_mode == "pooled" else "0"
             f.write(f"""
@@ -99,6 +140,8 @@ services:
             run_command("docker-compose up -d pgbouncer", cwd=None)
 
         run_command(f"docker-compose up -d {service_name}")
+
+        # Wait for service to be ready
         wait_for_service(
             service_name,
             8000
@@ -106,8 +149,18 @@ services:
             else (8001 if framework == "django" else 8002),
         )
 
-        # 2. Run Locust
-        # Host is localhost:port mapped
+        # 2. Start Resource Monitor
+        stop_event = threading.Event()
+        resource_results = {}
+        target_containers = ["postgres", service_name]
+
+        monitor_thread = threading.Thread(
+            target=monitor_resources,
+            args=(stop_event, target_containers, resource_results),
+        )
+        monitor_thread.start()
+
+        # 3. Run Locust
         port = (
             8000 if framework == "fastapi" else 8001 if framework == "django" else 8002
         )
@@ -128,16 +181,23 @@ services:
             host_url,
             "--csv",
             f"{RESULTS_DIR}/{filename}",
-            "--only-summary",  # Less log spam
+            "--only-summary",
         ]
 
         print(f"Starting Locust: {' '.join(cmd)}")
         subprocess.check_call(cmd)
 
+        # 4. Stop Monitor and Save
+        stop_event.set()
+        monitor_thread.join()
+
+        with open(resource_file, "w") as f:
+            json.dump(resource_results, f)
+
     except Exception as e:
         print(f"FAILED Scenario {filename}: {e}")
+        stop_event.set()  # ensure thread stops
     finally:
-        # Cleanup override
         if os.path.exists("docker-compose.override.yml"):
             os.remove("docker-compose.override.yml")
 
@@ -147,11 +207,8 @@ def generate_summary():
     print("Generating Summary Report...")
     summary_data = []
 
-    # Iterate over files in RESULTS_DIR
     for filename in os.listdir(RESULTS_DIR):
         if filename.endswith("_stats.csv"):
-            # Filename format: {framework}_{pool_mode}_{users}u_stats.csv
-            # We strip _stats.csv
             base_name = filename.replace("_stats.csv", "")
             parts = base_name.split("_")
             if len(parts) != 3:
@@ -161,12 +218,25 @@ def generate_summary():
             pool_mode = parts[1]
             users = parts[2].replace("u", "")
 
-            # Read CSV
+            # Read Stats
             try:
                 df = pd.read_csv(os.path.join(RESULTS_DIR, filename))
-                # Get Aggregated stats (usually last row or specific row 'Aggregated')
-                # Locust stats csv has 'Name' column. We want 'Aggregated'.
                 agg = df[df["Name"] == "Aggregated"].iloc[0]
+
+                # Read Resources
+                res_path = os.path.join(RESULTS_DIR, f"{base_name}_resources.json")
+                db_cpu = db_mem = app_cpu = app_mem = 0
+                if os.path.exists(res_path):
+                    with open(res_path, "r") as f:
+                        res = json.load(f)
+                        if "postgres" in res:
+                            db_cpu = round(res["postgres"]["avg_cpu"], 1)
+                            db_mem = round(res["postgres"]["avg_mem"], 1)
+
+                        app_container = f"{framework}-app"
+                        if app_container in res:
+                            app_cpu = round(res[app_container]["avg_cpu"], 1)
+                            app_mem = round(res[app_container]["avg_mem"], 1)
 
                 summary_data.append(
                     {
@@ -177,6 +247,10 @@ def generate_summary():
                         "P95 Latency (ms)": agg["95%"],
                         "P99 Latency (ms)": agg["99%"],
                         "Failures/s": agg["Failures/s"],
+                        "DB CPU (%)": db_cpu,
+                        "DB Mem (%)": db_mem,
+                        "App CPU (%)": app_cpu,
+                        "App Mem (%)": app_mem,
                     }
                 )
             except Exception as e:
@@ -189,12 +263,7 @@ def generate_summary():
         # Save to CSV
         summary_df.to_csv("summary_report.csv", index=False)
 
-        # Save to Markdown
-        with open("README.md", "a") as f:
-            f.write("\n## Benchmark Results\n")
-            f.write(summary_df.to_markdown(index=False))
-
-        print("Summary Report Saved to summary_report.csv and appended to README.md")
+        print("Summary Report Saved to summary_report.csv")
 
 
 def main():
@@ -210,7 +279,6 @@ def main():
             for pool_mode in POOL_MODES:
                 for users in USER_COUNTS:
                     run_scenario(framework, pool_mode, users)
-                    # Cool down
                     time.sleep(5)
 
         generate_summary()
