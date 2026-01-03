@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: benchmark_db
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - benchmark-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  pgbouncer:
+    image: edoburu/pgbouncer
+    container_name: pgbouncer
+    environment:
+      DB_USER: postgres
+      DB_PASSWORD: password
+      DB_HOST: postgres
+      DB_NAME: benchmark_db
+      LISTEN_PORT: 6432
+      AUTH_TYPE: md5
+      AUTH_FILE: /etc/pgbouncer/userlist.txt
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt
+    depends_on:
+      - postgres
+    ports:
+      - "6432:6432"
+    networks:
+      - benchmark-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  fastapi-app:
+    build:
+      context: ./apps/fastapi_app
+    container_name: fastapi-app
+    command: gunicorn main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+    environment:
+      DATABASE_URL_DIRECT: postgresql+asyncpg://postgres:password@postgres:5432/benchmark_db
+      DATABASE_URL_POOLED: postgresql+asyncpg://postgres:password@pgbouncer:6432/benchmark_db
+    ports:
+      - "8000:8000"
+    networks:
+      - benchmark-net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  django-app:
+    build:
+      context: ./apps/django_app
+    container_name: django-app
+    command: gunicorn --bind 0.0.0.0:8001 project.wsgi:application --workers 3 --threads 2
+    environment:
+      DATABASE_URL_DIRECT: postgresql://postgres:password@postgres:5432/benchmark_db
+      DATABASE_URL_POOLED: postgresql://postgres:password@pgbouncer:6432/benchmark_db
+    ports:
+      - "8001:8001"
+    networks:
+      - benchmark-net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  flask-app:
+    build:
+      context: ./apps/flask_app
+    container_name: flask-app
+    command: gunicorn --bind 0.0.0.0:8002 app:app --workers 3 --threads 2
+    environment:
+      DATABASE_URL_DIRECT: postgresql://postgres:password@postgres:5432/benchmark_db
+      DATABASE_URL_POOLED: postgresql://postgres:password@pgbouncer:6432/benchmark_db
+    ports:
+      - "8002:8002"
+    networks:
+      - benchmark-net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+networks:
+  benchmark-net:
+    driver: bridge
+
+volumes:
+  pg_data:

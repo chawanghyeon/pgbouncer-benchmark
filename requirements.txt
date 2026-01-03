@@ -1,0 +1,17 @@
+# Web Frameworks
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+django==5.0.1
+flask==3.0.1
+
+# Database Drivers & ORM
+sqlalchemy[asyncio]==2.0.25
+asyncpg==0.29.0
+psycopg[binary]==3.1.18
+psycopg2-binary==2.9.9
+
+# Load Testing & Analysis
+locust==2.20.1
+pandas==2.2.0
+matplotlib==3.8.2
+Faker==22.5.1
