@@ -142,35 +142,9 @@ python run_benchmark.py
 ### Data Table
 | Framework | Pool Mode | Users | RPS | P95 Latency (ms) | Failures/s |
 |-----------|-----------|-------|-----|------------------|------------|
-| django | direct | 10 | 283 | 63 | 0.0 |
-| django | direct | 50 | 280 | 200 | 0.0 |
-| django | direct | 100 | 278 | 390 | 0.0 |
-| django | direct | 200 | 279 | 760 | 0.0 |
-| django | direct | 500 | 279 | 1900 | 0.0 |
-| django | pooled | 10 | 530 | 23 | 0.0 |
-| django | pooled | 50 | 528 | 120 | 0.0 |
-| django | pooled | 100 | 532 | 230 | 0.0 |
-| django | pooled | 200 | 524 | 460 | 0.0 |
-| django | pooled | 500 | 519 | 1100 | 0.0 |
-| fastapi | direct | 10 | 893 | 52 | 0.0 |
-| fastapi | direct | 50 | 1832 | 53 | 0.0 |
-| fastapi | direct | 100 | 1811 | 110 | 0.0 |
-| fastapi | direct | 200 | 1724 | 240 | 0.0 |
-| fastapi | direct | 500 | 1549 | 680 | 0.0 |
-| fastapi | pooled | 10 | 1623 | 11 | 0.0 |
-| fastapi | pooled | 50 | 1956 | 38 | 0.0 |
-| fastapi | pooled | 100 | 1765 | 94 | 0.0 |
-| fastapi | pooled | 200 | 1733 | 200 | 0.0 |
-| fastapi | pooled | 500 | 1506 | 630 | 0.0 |
-| flask | direct | 10 | 1095 | 11 | 0.0 |
-| flask | direct | 50 | 1139 | 49 | 0.0 |
-| flask | direct | 100 | 1151 | 97 | 0.0 |
-| flask | direct | 200 | 1145 | 200 | 0.0 |
-| flask | direct | 500 | 1086 | 560 | 0.0 |
-| flask | pooled | 10 | 945 | 13 | 0.0 |
-| flask | pooled | 50 | 862 | 73 | 0.0 |
-| flask | pooled | 100 | 867 | 150 | 0.0 |
-| flask | pooled | 200 | 927 | 260 | 0.0 |
-| flask | pooled | 500 | 887 | 670 | 0.0 |
-
-## Benchmark Results
+| django | direct | 1000 | 61 | 18000 | 0.0 |
+| django | pooled | 1000 | 377 | 3700 | 0.0 |
+| fastapi | direct | 1000 | - | - | - |
+| fastapi | pooled | 1000 | 1134 | 1200 | 0.0 |
+| flask | direct | 1000 | 706 | 1700 | 0.0 |
+| flask | pooled | 1000 | 814 | 1400 | 0.0 |
